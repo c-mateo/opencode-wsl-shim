@@ -1,4 +1,4 @@
-# opencode-wsl-win-tools
+# opencode-wsl-shim
 
 opencode plugin for running inside **WSL2** that routes toolchain calls
 (`git`, `cargo`, `node`, `python`, ...) to the native **Windows `.exe`**
@@ -31,7 +31,7 @@ Via opencode config (recommended — opencode installs it with Bun at startup):
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [["opencode-wsl-win-tools", { "tools": { "git": "win" } }]]
+  "plugin": [["opencode-wsl-shim", { "tools": { "git": "win" } }]]
 }
 ```
 
@@ -56,7 +56,7 @@ ffmpeg, pandoc, vscode `code` · `"wsl"`: node, npm, npx, yarn,
 pnpm, bun, deno):
 
 ```json
-["opencode-wsl-win-tools", {
+["opencode-wsl-shim", {
   "default": "wsl",
   "tools": { "git": "win", "cargo": "win", "python": "win", "node": "wsl" },
   "translatePaths": true,

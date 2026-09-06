@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "opencode-wsl-win-tools",
+  "name": "opencode-wsl-shim",
   "version": "0.1.0",
   "description": "opencode plugin: route toolchain calls (git, cargo, node, python, ...) to native Windows .exe binaries when running inside WSL — workspace-aware, per-tool config, automatic fallback",
   "type": "module",

@@ -42,11 +42,15 @@ All fields optional. Per-tool values override `default`.
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `default` | `"wsl" \| "win"` | `"wsl"` | Fallback when `workspaceAware` is off and tool not listed |
+| `tools` | `Record<string, "wsl" \| "win">` | `{}` | Per-tool preference (explicit pins always win) |
 | `workspaceAware` | `boolean` | `true` | `/mnt/*` cwd → `win`, native WSL cwd → `wsl` (explicit `tools` pins override) |
 | `fallback` | `boolean \| { winToWsl?, wslToWin? }` | `true` | Per-direction fallback when preferred binary missing; `false` disables both (command left untouched) |
+| `translatePaths` | `boolean` | `true` | Convert absolute WSL paths to `C:\...` via `wslpath -w` |
+| `onlyUnderMnt` | `boolean` | `false` | Only rewrite when cwd is under `/mnt/*` |
 | `enabled` | `boolean` | `true` | Master switch; a project file can set `false` to disable all shims in that workspace |
 | `warnOn9P` | `boolean` | `true` | Warn when a `.exe` runs on the WSL-native filesystem (`\\wsl$\` 9P I/O penalty) |
 | `wslenv` | `string[]` | `[]` | Extra `WSLENV` entries (e.g. `"SSH_AUTH_SOCK/p"`) relayed to Windows processes |
+| `debug` | `boolean` | `false` | Log every rewrite via `client.app.log` |
 
 ## Per-workspace config
 
@@ -66,10 +70,6 @@ Useful cases: force the Linux toolchain in a project that builds native
 ELF binaries (`"tools": { "cargo": "wsl" }`), or kill the shim entirely
 with `"enabled": false`. The global fallback file
 `~/.config/opencode/wsl-win-tools.json` has the lowest priority.
-| `tools` | `Record<string, "wsl" \| "win">` | see below | Per-tool preference |
-| `translatePaths` | `boolean` | `true` | Convert absolute WSL paths to `C:\...` via `wslpath -w` |
-| `onlyUnderMnt` | `boolean` | `false` | Only rewrite when cwd is under `/mnt/*` |
-| `debug` | `boolean` | `false` | Log every rewrite via `client.app.log` |
 
 No hardcoded per-tool preferences: every known tool
 (git, cargo/rust, go, dotnet, java/mvn/gradle, node/npm/npx/yarn/pnpm/bun/deno,

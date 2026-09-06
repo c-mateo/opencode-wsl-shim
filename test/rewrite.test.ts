@@ -3,7 +3,7 @@ import { WslWinTools } from "../src/index.ts";
 
 // Simulated machine: WSL has git/cargo/node/npm, Windows has git/cargo/rustc/python exes.
 const WSL_BINS = new Set(["git", "cargo", "node", "npm"]);
-const WIN_EXES = new Set(["git.exe", "cargo.exe", "rustc.exe", "python.exe"]);
+const WIN_EXES = new Set(["git.exe", "cargo.exe", "rustc.exe", "python.exe", "go.exe", "docker.exe"]);
 
 function makePlugin(options: Record<string, unknown>) {
   const fake$ = ((s: TemplateStringsArray, ...v: unknown[]) => {
@@ -79,6 +79,14 @@ describe("wsl-win-tools rewrite", () => {
     expect(await run(plug, "sudo git status")).toBe("sudo git.exe status");
     expect(await run(plug, "git.exe status")).toBe("git.exe status");
     expect(await run(plug, "ls -la")).toBe("ls -la");
+  });
+
+  test("extended toolchain coverage", async () => {
+    const plug = await makePlugin({ workspaceAware: true });
+    expect(await run(plug, "go version")).toBe("go.exe version");
+    expect(await run(plug, "docker ps")).toBe("docker.exe ps");
+    // java.exe absent on this machine -> falls back to WSL
+    expect(await run(plug, "java -version")).toBe("java -version");
   });
 
   test("fallback disabled leaves command untouched", async () => {

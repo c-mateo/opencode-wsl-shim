@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/package.json",
   "name": "opencode-wsl-win-tools",
   "version": "0.1.0",
-  "description": "opencode plugin that routes toolchain calls (git, cargo, node, python, ...) to Windows .exe binaries when running inside WSL",
+  "description": "opencode plugin: route toolchain calls (git, cargo, node, python, ...) to native Windows .exe binaries when running inside WSL — workspace-aware, per-tool config, automatic fallback",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -25,7 +25,9 @@
     "opencode",
     "opencode-plugin",
     "wsl",
-    "windows"
+    "wsl2",
+    "windows",
+    "toolchain"
   ],
   "license": "MIT",
   "peerDependencies": {

@@ -49,11 +49,12 @@ All fields optional. Per-tool values override `default`.
 | `onlyUnderMnt` | `boolean` | `false` | Only rewrite when cwd is under `/mnt/*` |
 | `debug` | `boolean` | `false` | Log every rewrite via `client.app.log` |
 
-Built-in tool defaults (`"win"`: git, gh, cargo/rust, go, dotnet,
-java/mvn/gradle, python/pip/uv/ruff/poetry, ruby, php/composer,
-docker, kubectl/helm, terraform, aws/az/gcloud, psql/mysql/sqlite3,
-ffmpeg, pandoc, vscode `code` · `"wsl"`: node, npm, npx, yarn,
-pnpm, bun, deno):
+No hardcoded per-tool preferences: every known tool
+(git, cargo/rust, go, dotnet, java/mvn/gradle, node/npm/npx/yarn/pnpm/bun/deno,
+python/pip/uv/ruff/poetry, ruby, php/composer, docker, kubectl/helm,
+terraform, aws/az/gcloud, psql/mysql/sqlite3, ffmpeg, pandoc, vscode `code`)
+follows the workspace strategy above unless pinned in `tools`.
+(With `workspaceAware: false`, the `default` value applies to all.)
 
 ```json
 ["opencode-wsl-shim", {
@@ -73,4 +74,4 @@ read as a fallback when no tuple options are given.
 
 ## License
 
-MIT
+MIT — © 2026 [Mateo Cerri](https://github.com/c-mateo)

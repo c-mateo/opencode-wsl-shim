@@ -89,6 +89,13 @@ describe("wsl-win-tools rewrite", () => {
     expect(await run(plug, "java -version")).toBe("java -version");
   });
 
+  test("workspaceAware off: plain default applies, no legacy table", async () => {
+    const wsl = await makePlugin({ workspaceAware: false, default: "wsl" });
+    expect(await run(wsl, "git status")).toBe("git status");
+    const win = await makePlugin({ workspaceAware: false, default: "win" });
+    expect(await run(win, "git status")).toBe("git.exe status");
+  });
+
   test("fallback disabled leaves command untouched", async () => {
     const plug = await makePlugin({ workspaceAware: true, fallback: false });
     // node.exe missing and fallback off -> WSL node kept (would fail loudly if absent)

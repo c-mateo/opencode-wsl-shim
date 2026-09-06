@@ -90,52 +90,10 @@ const EXE_MAP: Record<string, string> = {
 // compiled/data/infra toolchains lean win (avoids double installs and variant
 // issues like line endings); js runtimes lean wsl (node often lives in WSL
 // via fnm/nvm with its own modules)
-const DEFAULT_TOOLS: Record<string, Mode> = {
-  git: "win",
-  "git-lfs": "win",
-  gh: "win",
-  cargo: "win",
-  rustc: "win",
-  rustup: "win",
-  go: "win",
-  dotnet: "win",
-  java: "win",
-  javac: "win",
-  mvn: "win",
-  gradle: "win",
-  python: "win",
-  python3: "win",
-  pip: "win",
-  pip3: "win",
-  uv: "win",
-  ruff: "win",
-  poetry: "win",
-  pytest: "win",
-  ruby: "win",
-  php: "win",
-  composer: "win",
-  docker: "win",
-  kubectl: "win",
-  helm: "win",
-  terraform: "win",
-  tofu: "win",
-  aws: "win",
-  az: "win",
-  gcloud: "win",
-  psql: "win",
-  mysql: "win",
-  sqlite3: "win",
-  ffmpeg: "win",
-  pandoc: "win",
-  code: "win",
-  node: "wsl",
-  npm: "wsl",
-  npx: "wsl",
-  yarn: "wsl",
-  pnpm: "wsl",
-  bun: "wsl",
-  deno: "wsl",
-};
+// Legacy static table, intentionally empty: with workspaceAware (default)
+// the workspace location decides (win under /mnt/*, wsl elsewhere).
+// Only used as merge base when workspaceAware is off, where `default` applies.
+const DEFAULT_TOOLS: Record<string, Mode> = {};
 
 // prefixes to skip when looking for the binary (sudo, env, VAR=x, command, time, nice...)
 const SKIP_TOKENS = new Set(["sudo", "command", "time", "nice", "env", "nohup", "xargs"]);

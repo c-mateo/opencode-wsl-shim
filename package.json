@@ -3,6 +3,11 @@
   "name": "opencode-wsl-shim",
   "version": "0.1.0",
   "description": "opencode plugin: route toolchain calls (git, cargo, node, python, ...) to native Windows .exe binaries when running inside WSL — workspace-aware, per-tool config, automatic fallback",
+  "author": "Mateo Cerri",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/c-mateo/opencode-wsl-shim.git"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

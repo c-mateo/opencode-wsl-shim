@@ -1,7 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 
 type Mode = "win" | "wsl";
@@ -25,6 +25,15 @@ export interface WslWinToolsOptions {
   translatePaths?: boolean;
   onlyUnderMnt?: boolean;
   debug?: boolean;
+  /** Master switch (default true). A project file can set false to disable
+   *  all shims in that workspace (e.g. to force ELF builds with WSL cargo). */
+  enabled?: boolean;
+  /** Warn when a .exe runs against the WSL-native filesystem, which goes
+   *  through \\wsl$\\ (9P) with severe I/O penalty (default true). */
+  warnOn9P?: boolean;
+  /** Extra WSLENV entries (e.g. ["SSH_AUTH_SOCK/p"]) relayed to Windows
+   *  processes so git/cargo can auth against private repos (default []). */
+  wslenv?: string[];
 }
 
 type ResolvedConfig = Required<Omit<WslWinToolsOptions, "fallback">> & {
@@ -137,7 +146,60 @@ function resolveConfig(options?: Record<string, unknown>, fallback: WslWinToolsO
     translatePaths: o.translatePaths ?? fallback.translatePaths ?? true,
     onlyUnderMnt: o.onlyUnderMnt ?? fallback.onlyUnderMnt ?? false,
     debug: o.debug ?? fallback.debug ?? false,
+    enabled: o.enabled ?? fallback.enabled ?? true,
+    warnOn9P: o.warnOn9P ?? fallback.warnOn9P ?? true,
+    wslenv: o.wslenv ?? fallback.wslenv ?? [],
   };
+}
+
+function mergeConfigs(base: ResolvedConfig, proj: WslWinToolsOptions): ResolvedConfig {
+  if (!proj || Object.keys(proj).length === 0) return base;
+  return {
+    ...base,
+    default: proj.default ?? base.default,
+    tools: { ...base.tools, ...(proj.tools ?? {}) },
+    explicit: { ...base.explicit, ...(proj.tools ?? {}) },
+    workspaceAware: proj.workspaceAware ?? base.workspaceAware,
+    fallback: proj.fallback !== undefined ? resolveFallback(proj.fallback) : base.fallback,
+    translatePaths: proj.translatePaths ?? base.translatePaths,
+    onlyUnderMnt: proj.onlyUnderMnt ?? base.onlyUnderMnt,
+    debug: proj.debug ?? base.debug,
+    enabled: proj.enabled ?? base.enabled,
+    warnOn9P: proj.warnOn9P ?? base.warnOn9P,
+    wslenv: proj.wslenv ?? base.wslenv,
+  };
+}
+
+// Per-workspace config: .opencode/wsl-shim.json, searched upward from dir.
+const projectCache = new Map<string, { mtime: number; config: WslWinToolsOptions }>();
+
+function findProjectFile(start: string): string | null {
+  let dir = start;
+  for (let i = 0; i < 32 && dir && dir !== "/"; i++) {
+    const f = join(dir, ".opencode", "wsl-shim.json");
+    try {
+      if (existsSync(f)) return f;
+    } catch {
+      return null;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+function loadProjectFile(file: string): WslWinToolsOptions {
+  try {
+    const mtime = statSync(file).mtimeMs;
+    const hit = projectCache.get(file);
+    if (hit && hit.mtime === mtime) return hit.config;
+    const config = JSON.parse(readFileSync(file, "utf8")) as WslWinToolsOptions;
+    projectCache.set(file, { mtime, config });
+    return config;
+  } catch {
+    return {};
+  }
 }
 
 function modeFor(tool: string, cfg: ResolvedConfig, inWindows: boolean): Mode {
@@ -276,7 +338,19 @@ function looksLikeAbsPath(arg: string): boolean {
 export const WslWinTools = (async ({ client, $, directory }, options) => {
   if (!isWSL()) return {};
   const fallback = await loadFallbackJson();
-  const cfg = resolveConfig(options, fallback);
+  const base = resolveConfig(options, fallback);
+
+  // Per-call config: tuple/global options, overridden by the workspace file.
+  function configForCall(cwd: string): ResolvedConfig {
+    const starts = [cwd, directory].filter((d): d is string => !!d);
+    for (const start of starts) {
+      const file = findProjectFile(start);
+      if (!file) continue;
+      const proj = loadProjectFile(file);
+      if (Object.keys(proj).length > 0) return mergeConfigs(base, proj);
+    }
+    return base;
+  }
 
   const exeCache = new Map<string, boolean>();
   const pathCache = new Map<string, string>();
@@ -319,7 +393,7 @@ export const WslWinTools = (async ({ client, $, directory }, options) => {
     }
   }
 
-  async function debug(msg: string) {
+  async function debug(cfg: ResolvedConfig, msg: string) {
     if (!cfg.debug) return;
     try {
       await client.app.log({ body: { service: "wsl-win-tools", level: "info", message: msg } });
@@ -328,7 +402,7 @@ export const WslWinTools = (async ({ client, $, directory }, options) => {
     }
   }
 
-  async function rewriteSegment(seg: string, inWindows: boolean): Promise<string> {
+  async function rewriteSegment(seg: string, inWindows: boolean, cfg: ResolvedConfig): Promise<string> {
     if (!seg.trim()) return seg;
     const toks = tokenize(seg);
     if (toks.length === 0) return seg;
@@ -384,6 +458,12 @@ export const WslWinTools = (async ({ client, $, directory }, options) => {
 
     if (!useExe) return seg;
 
+    if (!inWindows && cfg.warnOn9P) {
+      await warnOnce(
+        `wsl-win-tools: running ${exe} on the WSL-native filesystem goes through \\\\wsl$\\\\ (9P) with severe I/O penalty; prefer WSL ${base} or move the project under /mnt/`,
+      );
+    }
+
     const leading = seg.match(/^\s*/)?.[0] ?? "";
     const trailing = seg.match(/\s*$/)?.[0] ?? "";
     const rest = toks.slice(binIdx + 1);
@@ -409,11 +489,13 @@ export const WslWinTools = (async ({ client, $, directory }, options) => {
     }
 
     const rewritten = leading + outToks.join(" ") + trailing;
-    await debug(`wsl-win-tools: '${seg.trim()}' -> '${rewritten.trim()}'`);
+    await debug(cfg, `wsl-win-tools: '${seg.trim()}' -> '${rewritten.trim()}'`);
     return rewritten;
   }
 
   async function rewriteCommand(cmd: string, cwd: string): Promise<string> {
+    const cfg = configForCall(cwd);
+    if (!cfg.enabled) return cmd;
     if (cfg.onlyUnderMnt && !cwd.startsWith("/mnt/")) return cmd;
     const inWindows = cwd.startsWith("/mnt/");
     // quick exit if no managed tool name appears
@@ -423,7 +505,7 @@ export const WslWinTools = (async ({ client, $, directory }, options) => {
     const out: string[] = [];
     for (const p of parts) {
       if (OP_SET.has(p)) out.push(p);
-      else out.push(await rewriteSegment(p, inWindows));
+      else out.push(await rewriteSegment(p, inWindows, cfg));
     }
     return out.join("");
   }
@@ -438,6 +520,19 @@ export const WslWinTools = (async ({ client, $, directory }, options) => {
         output.args.command = await rewriteCommand(cmd, cwd);
       } catch (e) {
         await warnOnce(`wsl-win-tools error: ${String(e)}`);
+      }
+    },
+    "shell.env": async (input, output) => {
+      try {
+        const cfg = configForCall(input.cwd ?? "");
+        if (!cfg.enabled || cfg.wslenv.length === 0) return;
+        if (!output.env) output.env = {};
+        const cur = output.env.WSLENV ?? process.env.WSLENV ?? "";
+        const parts = cur.split(":").filter(Boolean);
+        for (const e of cfg.wslenv) if (!parts.includes(e)) parts.push(e);
+        output.env.WSLENV = parts.join(":");
+      } catch {
+        // never break shell startup over env relay
       }
     },
   };

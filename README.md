@@ -44,6 +44,28 @@ All fields optional. Per-tool values override `default`.
 | `default` | `"wsl" \| "win"` | `"wsl"` | Fallback when `workspaceAware` is off and tool not listed |
 | `workspaceAware` | `boolean` | `true` | `/mnt/*` cwd → `win`, native WSL cwd → `wsl` (explicit `tools` pins override) |
 | `fallback` | `boolean \| { winToWsl?, wslToWin? }` | `true` | Per-direction fallback when preferred binary missing; `false` disables both (command left untouched) |
+| `enabled` | `boolean` | `true` | Master switch; a project file can set `false` to disable all shims in that workspace |
+| `warnOn9P` | `boolean` | `true` | Warn when a `.exe` runs on the WSL-native filesystem (`\\wsl$\` 9P I/O penalty) |
+| `wslenv` | `string[]` | `[]` | Extra `WSLENV` entries (e.g. `"SSH_AUTH_SOCK/p"`) relayed to Windows processes |
+
+## Per-workspace config
+
+Drop a `.opencode/wsl-shim.json` file in any project (searched upward from
+the command's cwd). Same shape as the options, lower priority than the
+plugin tuple options:
+
+```json
+{
+  "tools": { "cargo": "wsl" },
+  "enabled": true,
+  "wslenv": ["SSH_AUTH_SOCK/p"]
+}
+```
+
+Useful cases: force the Linux toolchain in a project that builds native
+ELF binaries (`"tools": { "cargo": "wsl" }`), or kill the shim entirely
+with `"enabled": false`. The global fallback file
+`~/.config/opencode/wsl-win-tools.json` has the lowest priority.
 | `tools` | `Record<string, "wsl" \| "win">` | see below | Per-tool preference |
 | `translatePaths` | `boolean` | `true` | Convert absolute WSL paths to `C:\...` via `wslpath -w` |
 | `onlyUnderMnt` | `boolean` | `false` | Only rewrite when cwd is under `/mnt/*` |

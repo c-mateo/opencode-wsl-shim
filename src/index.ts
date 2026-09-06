@@ -6,13 +6,32 @@ import { homedir } from "node:os";
 
 type Mode = "win" | "wsl";
 
+export interface FallbackOptions {
+  /** Preferred win but .exe missing -> keep WSL binary (default true). */
+  winToWsl?: boolean;
+  /** Preferred wsl but binary missing -> use .exe if present (default true). */
+  wslToWin?: boolean;
+}
+
 export interface WslWinToolsOptions {
   default?: Mode;
   tools?: Record<string, Mode>;
+  /** Workspace-aware strategy (default true): cwd under /mnt/* -> win, else wsl.
+   *  Explicit `tools` entries always win over this. */
+  workspaceAware?: boolean;
+  /** Fallback direction when the preferred variant is missing.
+   *  `true` (default) = both directions, `false` = none (leave command untouched). */
+  fallback?: boolean | FallbackOptions;
   translatePaths?: boolean;
   onlyUnderMnt?: boolean;
   debug?: boolean;
 }
+
+type ResolvedConfig = Required<Omit<WslWinToolsOptions, "fallback">> & {
+  /** Explicit per-tool pins from options/fallback JSON (before defaults). */
+  explicit: Record<string, Mode>;
+  fallback: Required<FallbackOptions>;
+};
 
 const FALLBACK_JSON = join(homedir(), ".config", "opencode", "wsl-win-tools.json");
 
@@ -86,19 +105,28 @@ async function loadFallbackJson(): Promise<WslWinToolsOptions> {
   }
 }
 
-function resolveConfig(options?: Record<string, unknown>, fallback: WslWinToolsOptions = {}): Required<WslWinToolsOptions> {
+function resolveFallback(fb?: boolean | FallbackOptions): Required<FallbackOptions> {
+  if (fb === false) return { winToWsl: false, wslToWin: false };
+  if (fb === true || fb === undefined) return { winToWsl: true, wslToWin: true };
+  return { winToWsl: fb.winToWsl ?? true, wslToWin: fb.wslToWin ?? true };
+}
+
+function resolveConfig(options?: Record<string, unknown>, fallback: WslWinToolsOptions = {}): ResolvedConfig {
   const o = (options ?? {}) as WslWinToolsOptions;
   return {
     default: o.default ?? fallback.default ?? "wsl",
     tools: { ...DEFAULT_TOOLS, ...(fallback.tools ?? {}), ...(o.tools ?? {}) },
+    explicit: { ...(fallback.tools ?? {}), ...(o.tools ?? {}) },
+    workspaceAware: o.workspaceAware ?? fallback.workspaceAware ?? true,
+    fallback: resolveFallback(o.fallback ?? fallback.fallback),
     translatePaths: o.translatePaths ?? fallback.translatePaths ?? true,
     onlyUnderMnt: o.onlyUnderMnt ?? fallback.onlyUnderMnt ?? false,
     debug: o.debug ?? fallback.debug ?? false,
   };
 }
 
-function modeFor(tool: string, cfg: Required<WslWinToolsOptions>): Mode {
-  return cfg.tools[tool] ?? cfg.default;
+function modeFor(tool: string, cfg: ResolvedConfig, inWindows: boolean): Mode {
+  return cfg.explicit[tool] ?? (cfg.workspaceAware ? (inWindows ? "win" : "wsl") : (cfg.tools[tool] ?? cfg.default));
 }
 
 // Split command into segments on shell operators, respecting quotes.
@@ -239,14 +267,14 @@ export const WslWinTools = (async ({ client, $, directory }, options) => {
   const pathCache = new Map<string, string>();
   const warned = new Set<string>();
 
-  async function exeExists(exe: string): Promise<boolean> {
-    if (exeCache.has(exe)) return exeCache.get(exe)!;
+  async function binExists(bin: string): Promise<boolean> {
+    if (exeCache.has(bin)) return exeCache.get(bin)!;
     try {
-      await $`sh -c ${`command -v ${exe}`}`.quiet().text();
-      exeCache.set(exe, true);
+      await $`sh -c ${`command -v ${bin}`}`.quiet().text();
+      exeCache.set(bin, true);
       return true;
     } catch {
-      exeCache.set(exe, false);
+      exeCache.set(bin, false);
       return false;
     }
   }
@@ -285,7 +313,7 @@ export const WslWinTools = (async ({ client, $, directory }, options) => {
     }
   }
 
-  async function rewriteSegment(seg: string): Promise<string> {
+  async function rewriteSegment(seg: string, inWindows: boolean): Promise<string> {
     if (!seg.trim()) return seg;
     const toks = tokenize(seg);
     if (toks.length === 0) return seg;
@@ -303,21 +331,43 @@ export const WslWinTools = (async ({ client, $, directory }, options) => {
     }
     if (binIdx === -1) return seg;
 
-    let base = stripQuotes(toks[binIdx]);
-    // already an exe -> only translate paths
-    const alreadyExe = base.toLowerCase().endsWith(".exe");
-    if (alreadyExe) base = base.replace(/\.exe$/i, "");
+    const origBin = stripQuotes(toks[binIdx]);
+    // already an exe -> keep it, only translate paths
+    const alreadyExe = origBin.toLowerCase().endsWith(".exe");
+    const base = alreadyExe ? origBin.replace(/\.exe$/i, "") : origBin;
 
     const exe = EXE_MAP[base];
     if (!exe) return seg; // not a managed tool
 
-    const wantWin = alreadyExe || modeFor(base, cfg) === "win";
-    if (!wantWin) return seg;
+    const wantWin = alreadyExe || modeFor(base, cfg, inWindows) === "win";
 
-    if (!(await exeExists(exe))) {
-      await warnOnce(`wsl-win-tools: ${exe} not found in PATH, using WSL ${base}`);
-      return seg;
+    // Bidirectional fallback to whichever binary actually exists (if enabled).
+    let useExe: boolean;
+    if (alreadyExe) {
+      useExe = true;
+      if (!(await binExists(exe))) await warnOnce(`wsl-win-tools: ${exe} not found in PATH`);
+    } else if (wantWin) {
+      if (await binExists(exe)) {
+        useExe = true;
+      } else if (cfg.fallback.winToWsl) {
+        await warnOnce(`wsl-win-tools: ${exe} not found in PATH, using WSL ${base}`);
+        return seg;
+      } else {
+        await warnOnce(`wsl-win-tools: ${exe} not found in PATH, leaving ${base} untouched (fallback disabled)`);
+        return seg;
+      }
+    } else {
+      if (await binExists(base)) return seg;
+      if (cfg.fallback.wslToWin && (await binExists(exe))) {
+        useExe = true;
+        await warnOnce(`wsl-win-tools: WSL ${base} not found, falling back to ${exe}`);
+      } else {
+        await warnOnce(`wsl-win-tools: WSL ${base} not found, leaving command untouched (fallback disabled)`);
+        return seg;
+      }
     }
+
+    if (!useExe) return seg;
 
     const leading = seg.match(/^\s*/)?.[0] ?? "";
     const trailing = seg.match(/\s*$/)?.[0] ?? "";
@@ -350,6 +400,7 @@ export const WslWinTools = (async ({ client, $, directory }, options) => {
 
   async function rewriteCommand(cmd: string, cwd: string): Promise<string> {
     if (cfg.onlyUnderMnt && !cwd.startsWith("/mnt/")) return cmd;
+    const inWindows = cwd.startsWith("/mnt/");
     // quick exit if no managed tool name appears
     const names = Object.keys(EXE_MAP).join("|");
     if (!new RegExp(`(^|[\\s;&|(\`'"])(${names})(\\s|$|\\.|\\.exe)`, "i").test(cmd)) return cmd;
@@ -357,7 +408,7 @@ export const WslWinTools = (async ({ client, $, directory }, options) => {
     const out: string[] = [];
     for (const p of parts) {
       if (OP_SET.has(p)) out.push(p);
-      else out.push(await rewriteSegment(p));
+      else out.push(await rewriteSegment(p, inWindows));
     }
     return out.join("");
   }

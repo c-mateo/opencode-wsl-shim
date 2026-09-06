@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { WslWinTools } from "../src/index.ts";
 
+// Simulated machine: WSL has git/cargo/node/npm, Windows has git/cargo/rustc/python exes.
+const WSL_BINS = new Set(["git", "cargo", "node", "npm"]);
+const WIN_EXES = new Set(["git.exe", "cargo.exe", "rustc.exe", "python.exe"]);
+
 function makePlugin(options: Record<string, unknown>) {
   const fake$ = ((s: TemplateStringsArray, ...v: unknown[]) => {
     const cmd = s.reduce((a, p, i) => a + p + String(v[i] ?? ""), "");
@@ -10,8 +14,8 @@ function makePlugin(options: Record<string, unknown>) {
       },
       async text() {
         if (cmd.includes("command -v")) {
-          const exe = cmd.trim().split(/\s+/).pop()!;
-          if (/^(git|cargo|rustc|python)\.exe$/.test(exe)) return `/mnt/c/fake/${exe}\n`;
+          const bin = cmd.trim().split(/\s+/).pop()!;
+          if (WSL_BINS.has(bin) || WIN_EXES.has(bin)) return `/fake/${bin}\n`;
           throw new Error("not found");
         }
         if (cmd.includes("wslpath")) {
@@ -38,11 +42,30 @@ async function run(plug: any, cmd: string, cwd = "/mnt/c/Users/u/proj") {
 }
 
 describe("wsl-win-tools rewrite", () => {
-  test("win tools get .exe, wsl tools untouched", async () => {
+  test("explicit pins win over everything", async () => {
     const plug = await makePlugin({ default: "wsl", tools: { git: "win", cargo: "win", node: "wsl" } });
     expect(await run(plug, "git status")).toBe("git.exe status");
     expect(await run(plug, "cargo build && npm test")).toBe("cargo.exe build && npm test");
     expect(await run(plug, "node --version")).toBe("node --version");
+  });
+
+  test("workspaceAware: windows workspace defaults to exe", async () => {
+    const plug = await makePlugin({ workspaceAware: true });
+    expect(await run(plug, "git status")).toBe("git.exe status");
+    // node.exe missing -> falls back to WSL node
+    expect(await run(plug, "node --version")).toBe("node --version");
+  });
+
+  test("workspaceAware: native wsl workspace defaults to wsl", async () => {
+    const plug = await makePlugin({ workspaceAware: true });
+    expect(await run(plug, "cargo build", "/home/u/proj")).toBe("cargo build");
+    expect(await run(plug, "git status", "/home/u/proj")).toBe("git status");
+  });
+
+  test("reverse fallback: missing wsl binary uses exe", async () => {
+    const plug = await makePlugin({ workspaceAware: true });
+    // python exists only as Windows exe on this machine
+    expect(await run(plug, "python script.py", "/home/u/proj")).toBe("python.exe script.py");
   });
 
   test("absolute paths translated via wslpath", async () => {
@@ -58,8 +81,18 @@ describe("wsl-win-tools rewrite", () => {
     expect(await run(plug, "ls -la")).toBe("ls -la");
   });
 
-  test("missing exe falls back to wsl", async () => {
-    const plug = await makePlugin({ default: "wsl", tools: { npm: "win" } });
-    expect(await run(plug, "npm test")).toBe("npm test");
+  test("fallback disabled leaves command untouched", async () => {
+    const plug = await makePlugin({ workspaceAware: true, fallback: false });
+    // node.exe missing and fallback off -> WSL node kept (would fail loudly if absent)
+    expect(await run(plug, "node --version")).toBe("node --version");
+    // python missing in WSL and fallback off -> untouched
+    expect(await run(plug, "python script.py", "/home/u/proj")).toBe("python script.py");
+  });
+
+  test("fallback direction configurable", async () => {
+    const noWin = await makePlugin({ workspaceAware: true, fallback: { wslToWin: false } });
+    expect(await run(noWin, "python script.py", "/home/u/proj")).toBe("python script.py");
+    const noWsl = await makePlugin({ default: "wsl", tools: { npm: "win" }, fallback: { winToWsl: false } });
+    expect(await run(noWsl, "npm test")).toBe("npm test");
   });
 });

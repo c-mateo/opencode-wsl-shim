@@ -6,12 +6,23 @@ binaries instead of the WSL ones — per tool, with automatic path translation.
 
 ## How it works
 
-Hooks into `tool.execute.before` for the `bash` tool. When the model runs e.g.
-`git -C /mnt/c/Users/you/proj status`, the plugin rewrites it to
-`git.exe -C C:\Users\you\proj status` (paths via `wslpath -w`).
-Outside WSL it does nothing. If a `.exe` is missing from `PATH`
-(e.g. `node.exe` when node lives in WSL via fnm), it silently falls back
-to the WSL binary.
+Hooks into `tool.execute.before` for the `bash` tool. Strategy, in priority
+order:
+
+1. **Explicit `tools` pins** — always win (e.g. `"git": "win"`).
+2. **Workspace-aware default** (`workspaceAware: true`, the default):
+   command runs under `/mnt/*` (Windows filesystem) → `.exe`,
+   otherwise (native WSL filesystem) → WSL binary. This avoids variant
+   issues like git line-ending noise or WSL node missing packages.
+3. **Fallback to whatever exists** — if the preferred variant is not in
+   `PATH`, the other one is used (with a one-time warning). So you never
+   need cargo/node/python installed twice: set the preference, and a
+   missing binary falls back automatically. Each direction is
+   independently configurable via `fallback`.
+
+When the model runs e.g. `git -C /mnt/c/Users/you/proj status`, the
+plugin rewrites it to `git.exe -C C:\Users\you\proj status`
+(paths via `wslpath -w`). Outside WSL it does nothing.
 
 ## Installation
 
@@ -30,7 +41,9 @@ All fields optional. Per-tool values override `default`.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `default` | `"wsl" \| "win"` | `"wsl"` | Fallback for tools not listed in `tools` |
+| `default` | `"wsl" \| "win"` | `"wsl"` | Fallback when `workspaceAware` is off and tool not listed |
+| `workspaceAware` | `boolean` | `true` | `/mnt/*` cwd → `win`, native WSL cwd → `wsl` (explicit `tools` pins override) |
+| `fallback` | `boolean \| { winToWsl?, wslToWin? }` | `true` | Per-direction fallback when preferred binary missing; `false` disables both (command left untouched) |
 | `tools` | `Record<string, "wsl" \| "win">` | see below | Per-tool preference |
 | `translatePaths` | `boolean` | `true` | Convert absolute WSL paths to `C:\...` via `wslpath -w` |
 | `onlyUnderMnt` | `boolean` | `false` | Only rewrite when cwd is under `/mnt/*` |

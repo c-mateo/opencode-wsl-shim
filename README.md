@@ -49,8 +49,10 @@ All fields optional. Per-tool values override `default`.
 | `onlyUnderMnt` | `boolean` | `false` | Only rewrite when cwd is under `/mnt/*` |
 | `debug` | `boolean` | `false` | Log every rewrite via `client.app.log` |
 
-Built-in tool defaults (`"win"`: git, git-lfs, gh, cargo, rustc, rustup,
-python, python3, pip, pip3, uv, ruff · `"wsl"`: node, npm, npx, yarn,
+Built-in tool defaults (`"win"`: git, gh, cargo/rust, go, dotnet,
+java/mvn/gradle, python/pip/uv/ruff/poetry, ruby, php/composer,
+docker, kubectl/helm, terraform, aws/az/gcloud, psql/mysql/sqlite3,
+ffmpeg, pandoc, vscode `code` · `"wsl"`: node, npm, npx, yarn,
 pnpm, bun, deno):
 
 ```json

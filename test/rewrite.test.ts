@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WslWinTools } from "../src/index.ts";
 
+// CI runners (ubuntu-latest) are not WSL, and the plugin intentionally
+// no-ops outside WSL (returns {}). Force WSL mode so the rewrite logic
+// is exercised everywhere.
+process.env.WSL_SHIM_FORCE = "1";
+
 // Simulated machine: WSL has git/cargo/node/npm, Windows has git/cargo/rustc/python exes.
 const WSL_BINS = new Set(["git", "cargo", "node", "npm"]);
 const WIN_EXES = new Set(["git.exe", "cargo.exe", "rustc.exe", "python.exe", "go.exe", "docker.exe"]);
@@ -57,6 +62,9 @@ function makePlugin(options: Record<string, unknown>, extra: { logs?: string[]; 
 }
 
 async function run(plug: any, cmd: string, cwd = "/mnt/c/Users/u/proj") {
+  if (typeof plug["tool.execute.before"] !== "function") {
+    throw new Error("Plugin not initialized for this environment (not WSL and WSL_SHIM_FORCE not set)");
+  }
   const output = { args: { command: cmd, cwd } };
   await plug["tool.execute.before"]({ tool: "bash" }, output);
   return output.args.command as string;

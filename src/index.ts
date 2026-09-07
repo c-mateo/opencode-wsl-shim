@@ -107,7 +107,14 @@ const DEFAULT_TOOLS: Record<string, Mode> = {};
 // prefixes to skip when looking for the binary (sudo, env, VAR=x, command, time, nice...)
 const SKIP_TOKENS = new Set(["sudo", "command", "time", "nice", "env", "nohup", "xargs"]);
 
-function isWSL(): boolean {
+export function isWSL(): boolean {
+  // Escape hatch for tests/CI (non-WSL runners): WSL_SHIM_FORCE=1 pretends
+  // to be WSL, =0 pretends not to be. Real WSL hosts are unaffected.
+  const force = process.env.WSL_SHIM_FORCE?.toLowerCase();
+  if (force === "1" || force === "true") return true;
+  if (force === "0" || force === "false") return false;
+  // Standard WSL env markers (present on every WSL distro).
+  if (process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP) return true;
   if (process.platform !== "linux") return false;
   try {
     const v = readFileSync("/proc/version", "utf8").toLowerCase();
